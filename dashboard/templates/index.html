@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Descasio Market Intelligence Dashboard</title>
+<style>
+  :root {
+    --urgent: #d32f2f;
+    --high: #f57c00;
+    --medium: #fbc02d;
+    --low: #9e9e9e;
+    --bg: #0f1419;
+    --card-bg: #1a212b;
+    --text: #e8edf2;
+    --muted: #8a97a5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid #232b36;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .stats {
+    display: flex;
+    gap: 16px;
+    padding: 20px 32px;
+    flex-wrap: wrap;
+  }
+  .stat-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 14px 20px;
+    min-width: 120px;
+  }
+  .stat-card .num { font-size: 26px; font-weight: 700; }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+
+  .filters {
+    display: flex;
+    gap: 10px;
+    padding: 0 32px 16px;
+    flex-wrap: wrap;
+  }
+  .filters select {
+    background: var(--card-bg);
+    color: var(--text);
+    border: 1px solid #2a3340;
+    border-radius: 6px;
+    padding: 6px 10px;
+  }
+
+  .signals {
+    padding: 0 32px 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+  }
+  .signal-card {
+    background: var(--card-bg);
+    border-radius: 10px;
+    padding: 18px;
+    border-left: 4px solid var(--low);
+  }
+  .signal-card.URGENT { border-left-color: var(--urgent); }
+  .signal-card.HIGH { border-left-color: var(--high); }
+  .signal-card.MEDIUM { border-left-color: var(--medium); }
+  .signal-card.LOW { border-left-color: var(--low); }
+
+  .signal-card .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .badge.URGENT { background: var(--urgent); }
+  .badge.HIGH { background: var(--high); }
+  .badge.MEDIUM { background: var(--medium); color: #1a212b; }
+  .badge.LOW { background: var(--low); }
+
+  .signal-card h3 { margin: 0 0 6px; font-size: 16px; }
+  .meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .summary { font-size: 13px; margin-bottom: 10px; line-height: 1.4; }
+  .battlecard { font-size: 12px; padding-left: 18px; margin: 0; color: var(--muted); }
+  .battlecard li { margin-bottom: 4px; }
+  .footer-row {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Descasio Market Intelligence Dashboard</h1>
+  <p>Live view of sales and market intelligence signals (demo data)</p>
+</header>
+
+<div class="stats" id="stats"></div>
+
+<div class="filters">
+  <select id="countryFilter"><option value="">All Countries</option></select>
+  <select id="priorityFilter">
+    <option value="">All Priorities</option>
+    <option value="URGENT">URGENT</option>
+    <option value="HIGH">HIGH</option>
+    <option value="MEDIUM">MEDIUM</option>
+    <option value="LOW">LOW</option>
+  </select>
+  <select id="typeFilter"><option value="">All Types</option></select>
+</div>
+
+<div class="signals" id="signals"></div>
+
+<script>
+let allSignals = [];
+
+async function loadData() {
+  const [signalsRes, statsRes] = await Promise.all([
+    fetch('/api/signals'), fetch('/api/stats')
+  ]);
+  allSignals = await signalsRes.json();
+  const stats = await statsRes.json();
+  renderStats(stats);
+  populateFilters(allSignals);
+  renderSignals(allSignals);
+}
+
+function renderStats(stats) {
+  const el = document.getElementById('stats');
+  el.innerHTML = `
+    <div class="stat-card"><div class="num">${stats.total}</div><div class="label">Total Signals</div></div>
+    ${Object.entries(stats.by_priority).map(([k, v]) => `
+      <div class="stat-card"><div class="num">${v}</div><div class="label">${k}</div></div>
+    `).join('')}
+  `;
+}
+
+function populateFilters(signals) {
+  const countries = [...new Set(signals.map(s => s.country))].sort();
+  const types = [...new Set(signals.map(s => s.signal_type))].sort();
+  const cf = document.getElementById('countryFilter');
+  const tf = document.getElementById('typeFilter');
+  countries.forEach(c => cf.innerHTML += `<option value="${c}">${c}</option>`);
+  types.forEach(t => tf.innerHTML += `<option value="${t}">${t}</option>`);
+}
+
+function renderSignals(signals) {
+  const el = document.getElementById('signals');
+  if (signals.length === 0) {
+    el.innerHTML = '<p style="color:#8a97a5">No signals match the current filters.</p>';
+    return;
+  }
+  el.innerHTML = signals.map(s => `
+    <div class="signal-card ${s.priority}">
+      <div class="top-row">
+        <span class="badge ${s.priority}">${s.priority}</span>
+        <span class="meta">${s.relevance_score}/10</span>
+      </div>
+      <h3>${s.title}</h3>
+      <div class="meta">${s.country} · ${s.signal_type.replace('_', ' ')} · ${s.descasio_service_line}</div>
+      <div class="summary">${s.summary}</div>
+      <ul class="battlecard">
+        ${(s.battlecard_points || []).map(b => `<li>${b}</li>`).join('')}
+      </ul>
+      <div class="footer-row">
+        <span>${s.source}${s.deadline_raw ? ' · Deadline: ' + s.deadline_raw : ''}</span>
+        <span>${s.revenue_opportunity}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function applyFilters() {
+  const country = document.getElementById('countryFilter').value;
+  const priority = document.getElementById('priorityFilter').value;
+  const type = document.getElementById('typeFilter').value;
+  const filtered = allSignals.filter(s =>
+    (!country || s.country === country) &&
+    (!priority || s.priority === priority) &&
+    (!type || s.signal_type === type)
+  );
+  renderSignals(filtered);
+}
+
+document.getElementById('countryFilter').addEventListener('change', applyFilters);
+document.getElementById('priorityFilter').addEventListener('change', applyFilters);
+document.getElementById('typeFilter').addEventListener('change', applyFilters);
+
+loadData();
+</script>
+</body>
+</html>
