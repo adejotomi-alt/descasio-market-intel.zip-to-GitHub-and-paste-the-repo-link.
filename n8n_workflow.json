@@ -1,0 +1,458 @@
+{
+  "name": "Descasio Intel Hub — Monthly Executive Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "dmi-cron-001",
+      "name": "Monthly Trigger — 1st of Month 05:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Fires at 05:00 UTC on the 1st of every month (06:00 WAT). Triggers the full executive briefing pipeline."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://lambda.eu-west-1.amazonaws.com/2015-03-31/functions/descasio-market-intel/invocations",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "aws",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "mode",
+              "value": "exec"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "dmi-lambda-001",
+      "name": "Invoke Lambda — Run Exec Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "aws": {
+          "id": "aws-descasio-intel",
+          "name": "AWS Descasio Intel"
+        }
+      },
+      "notes": "Invokes the Lambda function in exec mode. Timeout set to 5 minutes — briefing generation can take 2–3 minutes for large signal batches."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-success",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 200,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "dmi-if-001",
+      "name": "Briefing Generated Successfully?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Routes successful briefings to delivery nodes. Failures go to error notification."
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = JSON.parse($input.first().json.body || '{}');\nconst briefing = body.briefing || {};\n\nreturn [{\n  json: {\n    briefing_month: briefing.briefing_month || new Date().toLocaleDateString('en-GB', {month:'long', year:'numeric'}),\n    executive_summary: briefing.executive_summary || '',\n    market_sentiment: briefing.market_sentiment || 'CAUTIOUS',\n    key_threats: briefing.key_threats || [],\n    opportunity_pipeline: briefing.opportunity_pipeline || [],\n    regulatory_landscape: briefing.regulatory_landscape || [],\n    strategic_recommendations: briefing.strategic_recommendations || [],\n    hyperscaler_dynamics: briefing.hyperscaler_dynamics || '',\n    competitor_intelligence: briefing.competitor_intelligence || '',\n    total_signals: briefing.total_signals_processed || 0,\n    generated_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "dmi-code-001",
+      "name": "Parse Briefing JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 220],
+      "notes": "Extracts structured briefing data from Lambda response for downstream delivery nodes."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_EXEC_WEBHOOK }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "=📊 Descasio Strategic Intelligence Brief — {{ $json.briefing_month }}"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Market Sentiment:* {{ $json.market_sentiment }}\n\n{{ $json.executive_summary }}"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "_Full brief sent to executive email list. {{ $json.total_signals }} signals processed this month._"
+              }
+            },
+            {
+              "type": "actions",
+              "elements": [
+                {
+                  "type": "button",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "View in Zoho Analytics →"
+                  },
+                  "url": "https://analytics.zoho.com/open-view/descasio-intel-exec"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "id": "dmi-slack-001",
+      "name": "Post to Slack — #leadership-intel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 180],
+      "notes": "Posts exec summary to #leadership-intel Slack channel. Set SLACK_EXEC_WEBHOOK in n8n environment variables."
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "module": "Market_Intelligence",
+        "fields": {
+          "fieldValues": [
+            {
+              "fieldApiName": "Name",
+              "value": "=Monthly Exec Brief — {{ $json.briefing_month }}"
+            },
+            {
+              "fieldApiName": "Signal_Type",
+              "value": "market_news"
+            },
+            {
+              "fieldApiName": "Priority",
+              "value": "HIGH"
+            },
+            {
+              "fieldApiName": "Summary",
+              "value": "={{ $json.executive_summary }}"
+            },
+            {
+              "fieldApiName": "Country",
+              "value": "Pan-Africa"
+            },
+            {
+              "fieldApiName": "Source_Name",
+              "value": "DAIA Monthly Briefing"
+            },
+            {
+              "fieldApiName": "Pushed_At",
+              "value": "={{ $json.generated_at }}"
+            }
+          ]
+        }
+      },
+      "id": "dmi-zoho-001",
+      "name": "Create Zoho CRM — Monthly Briefing Record",
+      "type": "n8n-nodes-base.zohoCrm",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "credentials": {
+        "zohoCrmOAuth2Api": {
+          "id": "zoho-descasio",
+          "name": "Zoho CRM Descasio"
+        }
+      },
+      "notes": "Saves a summary of the monthly brief to the Market_Intelligence module in Zoho CRM for full team visibility and audit trail."
+    },
+    {
+      "parameters": {
+        "operation": "syncData",
+        "reportType": "table",
+        "workspaceId": "={{ $env.ZOHO_ANALYTICS_WORKSPACE_ID }}",
+        "tableId": "Market_Intelligence_Monthly",
+        "matchingColumns": ["briefing_month"],
+        "columns": {
+          "columnValues": [
+            {
+              "column": "briefing_month",
+              "value": "={{ $json.briefing_month }}"
+            },
+            {
+              "column": "market_sentiment",
+              "value": "={{ $json.market_sentiment }}"
+            },
+            {
+              "column": "total_signals",
+              "value": "={{ $json.total_signals }}"
+            },
+            {
+              "column": "threats_count",
+              "value": "={{ $json.key_threats.length }}"
+            },
+            {
+              "column": "opportunities_count",
+              "value": "={{ $json.opportunity_pipeline.length }}"
+            },
+            {
+              "column": "executive_summary",
+              "value": "={{ $json.executive_summary }}"
+            }
+          ]
+        }
+      },
+      "id": "dmi-analytics-001",
+      "name": "Sync to Zoho Analytics — Exec Dashboard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 420],
+      "notes": "Updates the Zoho Analytics executive dashboard with this month's intelligence data. The C-Suite dashboard refreshes automatically after this sync."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_SALES_WEBHOOK }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "⚠️ *Intel Hub: Exec briefing generation failed*\n\nLambda returned status `{{ $json.statusCode }}`. Check CloudWatch logs: `descasio-market-intel`\n\nManual trigger: `python -m orchestrator.pipeline --mode exec`"
+              }
+            }
+          ]
+        }
+      },
+      "id": "dmi-error-001",
+      "name": "Alert — Briefing Generation Failed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 420],
+      "notes": "Fires only if Lambda returns a non-200 status. Posts to #bd-intel with recovery instructions."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.zohoapis.com/crm/v6/Market_Intelligence/search?criteria=(Signal_Type:equals:tender)AND(Priority:equals:URGENT)",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoCrmOAuth2Api",
+        "options": {}
+      },
+      "id": "dmi-zoho-002",
+      "name": "Fetch Open URGENT Tenders from Zoho",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 180],
+      "notes": "Retrieves all open URGENT tender records from Zoho CRM to compile the deal deadline digest for the BD team."
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $input.first().json.data || [];\nconst today = new Date();\n\nconst urgent = records\n  .filter(r => r.Deadline)\n  .map(r => ({\n    name: r.Name,\n    deadline: r.Deadline,\n    days_left: Math.ceil((new Date(r.Deadline) - today) / (1000*60*60*24)),\n    country: r.Country,\n    opportunity: r.Revenue_Opportunity,\n    service: r.Service_Line\n  }))\n  .filter(r => r.days_left >= 0 && r.days_left <= 14)\n  .sort((a,b) => a.days_left - b.days_left);\n\nconst digest = urgent.map(t =>\n  `• *${t.country}* — ${t.name.substring(0,60)} | ⏰ ${t.days_left}d left | ${t.opportunity}`\n).join('\\n');\n\nreturn [{ json: { urgent_tenders: urgent, digest_text: digest || 'No tenders expiring in the next 14 days.' } }];"
+      },
+      "id": "dmi-code-002",
+      "name": "Build Deadline Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 180],
+      "notes": "Compiles tenders expiring within 14 days into a formatted digest for the BD team."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_SALES_WEBHOOK }}",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "blocks": [
+            {
+              "type": "header",
+              "text": {
+                "type": "plain_text",
+                "text": "📅 Monthly Tender Deadline Digest"
+              }
+            },
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Tenders closing in the next 14 days:*\n\n={{ $json.digest_text }}"
+              }
+            },
+            {
+              "type": "context",
+              "elements": [
+                {
+                  "type": "mrkdwn",
+                  "text": "_Open Zoho CRM → Market Intelligence to view full battlecards._"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "id": "dmi-slack-002",
+      "name": "Post Deadline Digest to Sales Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 180],
+      "notes": "Posts tender deadline digest to #bd-intel. Gives the BD team a monthly heads-up on closing deals."
+    }
+  ],
+  "connections": {
+    "Monthly Trigger — 1st of Month 05:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Invoke Lambda — Run Exec Briefing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoke Lambda — Run Exec Briefing": {
+      "main": [
+        [
+          {
+            "node": "Briefing Generated Successfully?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Briefing Generated Successfully?": {
+      "main": [
+        [
+          {
+            "node": "Parse Briefing JSON",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert — Briefing Generation Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Briefing JSON": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack — #leadership-intel",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Zoho CRM — Monthly Briefing Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sync to Zoho Analytics — Exec Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack — #leadership-intel": {
+      "main": [
+        [
+          {
+            "node": "Fetch Open URGENT Tenders from Zoho",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Open URGENT Tenders from Zoho": {
+      "main": [
+        [
+          {
+            "node": "Build Deadline Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Deadline Digest": {
+      "main": [
+        [
+          {
+            "node": "Post Deadline Digest to Sales Channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "instanceId": "descasio-intel-hub",
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    { "id": "intel", "name": "Market Intelligence" },
+    { "id": "exec", "name": "Executive" },
+    { "id": "automated", "name": "Automated" }
+  ],
+  "_readme": {
+    "import_instructions": "Import this file in n8n via: Workflows → Import from File. Then configure credentials (AWS, Zoho CRM OAuth) and set environment variables (SLACK_EXEC_WEBHOOK, SLACK_SALES_WEBHOOK, ZOHO_ANALYTICS_WORKSPACE_ID) in n8n Settings → Variables.",
+    "credentials_needed": [
+      "AWS (for Lambda invocation) — type: aws",
+      "Zoho CRM OAuth 2.0 — type: zohoCrmOAuth2Api"
+    ],
+    "env_variables": [
+      "SLACK_EXEC_WEBHOOK",
+      "SLACK_SALES_WEBHOOK",
+      "ZOHO_ANALYTICS_WORKSPACE_ID"
+    ],
+    "workflow_summary": "Triggers on 1st of month → invokes Lambda exec briefing → on success: posts to Slack, creates Zoho CRM record, syncs Zoho Analytics, posts deadline digest to sales. On failure: alerts #bd-intel with recovery steps."
+  }
+}
